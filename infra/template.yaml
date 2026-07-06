@@ -1,0 +1,125 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  Recall — portable agentic memory on CockroachDB + AWS Bedrock.
+  MCP server (store/recall/forget) + scheduled episodic->semantic consolidation.
+
+Globals:
+  Function:
+    Runtime: python3.13
+    Timeout: 30
+    MemorySize: 512
+    Architectures: [arm64]
+    Environment:
+      Variables:
+        CRDB_SECRET_ARN: !Ref CrdbConnectionSecret
+        EMBED_MODEL_ID: amazon.titan-embed-text-v2:0
+        # Claude via inference profile (region-routed); Haiku tier for consolidation
+        CONSOLIDATE_MODEL_ID: !Ref ConsolidateModelId
+        POWERTOOLS_SERVICE_NAME: recall
+
+Parameters:
+  ConsolidateModelId:
+    Type: String
+    Default: us.anthropic.claude-haiku-4-5-20251001-v1:0
+    Description: Bedrock inference-profile id used by the consolidation worker.
+  ConsolidationScheduleExpression:
+    Type: String
+    Default: rate(1 hour)
+
+Resources:
+  # ---- Secrets -------------------------------------------------------------
+  CrdbConnectionSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: recall/crdb-connection
+      Description: CockroachDB Serverless connection string (set value out-of-band).
+
+  # ---- MCP server (agent-facing memory tools) ------------------------------
+  McpServerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: recall-mcp-server
+      CodeUri: ../src/mcp_server/
+      Handler: handler.lambda_handler
+      Description: MCP tools - store_memory / recall / forget / consolidate(trigger)
+      Policies:
+        - AWSSecretsManagerGetSecretValuePolicy:
+            SecretArn: !Ref CrdbConnectionSecret
+        - Statement:
+            - Effect: Allow
+              Action: [bedrock:InvokeModel]
+              Resource: '*'   # TODO(P1): scope to titan-embed + claude inference profile ARNs
+      Events:
+        McpApi:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref RecallApi
+            Path: /mcp
+            Method: POST
+
+  # ---- Consolidation worker (episodic -> semantic, the "dream" job) --------
+  ConsolidationFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: recall-consolidation
+      CodeUri: ../src/consolidation/
+      Handler: handler.lambda_handler
+      Timeout: 300
+      Description: EventBridge-scheduled Bedrock Claude distillation of episodes.
+      Policies:
+        - AWSSecretsManagerGetSecretValuePolicy:
+            SecretArn: !Ref CrdbConnectionSecret
+        - S3ReadPolicy:
+            BucketName: !Ref TranscriptBucket
+        - Statement:
+            - Effect: Allow
+              Action: [bedrock:InvokeModel]
+              Resource: '*'   # TODO(P2): scope
+      DeadLetterQueue:
+        Type: SQS
+        TargetArn: !GetAtt ConsolidationDlq.Arn
+      Events:
+        Schedule:
+          Type: ScheduleV2
+          Properties:
+            ScheduleExpression: !Ref ConsolidationScheduleExpression
+
+  ConsolidationDlq:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: recall-consolidation-dlq
+      MessageRetentionPeriod: 1209600   # 14 days
+
+  # ---- Storage --------------------------------------------------------------
+  TranscriptBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub recall-transcripts-${AWS::AccountId}
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+
+  # ---- Public demo API -------------------------------------------------------
+  RecallApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      Description: Recall public demo endpoint (functional demo URL for judging).
+      # TODO(P4): throttling + demo auth key
+
+  # TODO(P3): AgentCore Runtime + Gateway are provisioned via agentcore CLI in dev
+  # and pinned here as IaC before submission (production-readiness judging axis).
+
+Outputs:
+  DemoUrl:
+    Value: !Sub https://${RecallApi}.execute-api.${AWS::Region}.amazonaws.com/mcp
+  TranscriptBucketName:
+    Value: !Ref TranscriptBucket
+  CrdbSecretArn:
+    Value: !Ref CrdbConnectionSecret
