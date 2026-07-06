@@ -43,9 +43,14 @@ Resources:
       CodeUri: ../src/mcp_server/
       Handler: handler.lambda_handler
       Description: MCP tools - store_memory / recall / forget / consolidate(trigger)
+      Environment:
+        Variables:
+          CONSOLIDATION_FUNCTION_NAME: recall-consolidation
       Policies:
         - AWSSecretsManagerGetSecretValuePolicy:
             SecretArn: !Ref CrdbConnectionSecret
+        - LambdaInvokePolicy:
+            FunctionName: recall-consolidation
         - Statement:
             - Effect: Allow
               Action: [bedrock:InvokeModel]
