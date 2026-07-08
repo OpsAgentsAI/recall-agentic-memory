@@ -26,16 +26,24 @@ def _conn() -> psycopg.Connection:
     return psycopg.connect(_dsn(), autocommit=True)
 
 
+def _vec(embedding: list[float]) -> str:
+    """CockroachDB VECTOR literal. psycopg would adapt a Python list to a Postgres
+    array ('{...}'), which the VECTOR type rejects — so we render the '[...]' form
+    and every bind site casts it with ::VECTOR."""
+    return "[" + ",".join(repr(float(x)) for x in embedding) + "]"
+
+
 def insert_episode(**f: Any) -> str:
     sql = """
         INSERT INTO episodes (agent_id, session_id, role, content, content_hash,
                               embedding, metadata)
         VALUES (%(agent_id)s, %(session_id)s, %(role)s, %(content)s, %(content_hash)s,
-                %(embedding)s, %(metadata)s)
+                %(embedding)s::VECTOR, %(metadata)s)
         ON CONFLICT (agent_id, content_hash) DO UPDATE SET metadata = excluded.metadata
         RETURNING id
     """
     f["metadata"] = json.dumps(f.get("metadata") or {})
+    f["embedding"] = _vec(f["embedding"])
     with _conn() as conn:
         row = conn.execute(sql, f).fetchone()
     return str(row[0])
@@ -55,34 +63,35 @@ def hybrid_recall(
     """
     results: list[dict[str, Any]] = []
     meta = json.dumps(filters or {})
+    emb = _vec(embedding)
 
     if tier in ("episodes", "both"):
         sql = """
             SELECT id, 'episode' AS tier, content AS text, metadata, created_at,
-                   embedding <=> %(emb)s AS distance
+                   embedding <=> %(emb)s::VECTOR AS distance
             FROM episodes
             WHERE agent_id = %(agent_id)s AND metadata @> %(meta)s
-            ORDER BY embedding <=> %(emb)s
+            ORDER BY embedding <=> %(emb)s::VECTOR
             LIMIT %(k)s
         """
         with _conn() as conn:
             for r in conn.execute(
-                sql, {"agent_id": agent_id, "emb": embedding, "meta": meta, "k": k}
+                sql, {"agent_id": agent_id, "emb": emb, "meta": meta, "k": k}
             ):
                 results.append(_row(r))
 
     if tier in ("semantic", "both"):
         sql = """
             SELECT id, 'semantic' AS tier, statement AS text, metadata, created_at,
-                   embedding <=> %(emb)s AS distance
+                   embedding <=> %(emb)s::VECTOR AS distance
             FROM semantic_memories
             WHERE agent_id = %(agent_id)s AND metadata @> %(meta)s
-            ORDER BY embedding <=> %(emb)s
+            ORDER BY embedding <=> %(emb)s::VECTOR
             LIMIT %(k)s
         """
         with _conn() as conn:
             for r in conn.execute(
-                sql, {"agent_id": agent_id, "emb": embedding, "meta": meta, "k": k}
+                sql, {"agent_id": agent_id, "emb": emb, "meta": meta, "k": k}
             ):
                 results.append(_row(r))
 
@@ -147,13 +156,13 @@ def insert_semantic_memory(
         INSERT INTO semantic_memories
             (agent_id, kind, statement, confidence, embedding,
              source_episode_ids, supersedes)
-        VALUES (%s, %s, %s, %s, %s, %s, %s)
+        VALUES (%s, %s, %s, %s, %s::VECTOR, %s, %s)
         RETURNING id
     """
     with _conn() as conn:
         row = conn.execute(
             sql,
-            (agent_id, kind, statement, confidence, embedding,
+            (agent_id, kind, statement, confidence, _vec(embedding),
              source_episode_ids, supersedes_id),
         ).fetchone()
         if supersedes_id:
