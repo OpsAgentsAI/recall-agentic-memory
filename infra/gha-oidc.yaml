@@ -1,0 +1,88 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  One-time bootstrap: GitHub OIDC provider + keyless deployer role for
+  OpsAgentsAI/recall-agentic-memory. After this stack exists, all deploys run
+  from GitHub Actions with no long-lived AWS keys anywhere.
+
+Parameters:
+  GitHubRepo:
+    Type: String
+    Default: OpsAgentsAI/recall-agentic-memory
+
+Resources:
+  GitHubOidcProvider:
+    Type: AWS::IAM::OIDCProvider
+    Properties:
+      Url: https://token.actions.githubusercontent.com
+      ClientIdList: [sts.amazonaws.com]
+      ThumbprintList: [6938fd4d98bab03faadb97b34396831e3780aea1]
+
+  DeployerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: recall-gha-deployer
+      MaxSessionDuration: 3600
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !Ref GitHubOidcProvider
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                token.actions.githubusercontent.com:aud: sts.amazonaws.com
+              StringLike:
+                token.actions.githubusercontent.com:sub: !Sub repo:${GitHubRepo}:ref:refs/heads/main
+      Policies:
+        - PolicyName: recall-sam-deploy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: CloudFormation
+                Effect: Allow
+                Action: [cloudformation:*]
+                Resource:
+                  - !Sub arn:aws:cloudformation:us-east-1:${AWS::AccountId}:stack/recall*/*
+                  - !Sub arn:aws:cloudformation:us-east-1:${AWS::AccountId}:stack/aws-sam-cli-managed-default*/*
+              - Sid: CfnTemplateChecks
+                Effect: Allow
+                Action: [cloudformation:ValidateTemplate, cloudformation:CreateChangeSet]
+                Resource: '*'
+              - Sid: SamArtifactBuckets
+                Effect: Allow
+                Action: [s3:*]
+                Resource:
+                  - arn:aws:s3:::aws-sam-cli-managed-default*
+                  - !Sub arn:aws:s3:::recall-*
+              - Sid: LambdaApiEventsQueue
+                Effect: Allow
+                Action:
+                  - lambda:*
+                  - apigateway:*
+                  - events:*
+                  - scheduler:*
+                  - sqs:*
+                  - logs:*
+                Resource: '*'
+              - Sid: Secrets
+                Effect: Allow
+                Action: [secretsmanager:*]
+                Resource: !Sub arn:aws:secretsmanager:us-east-1:${AWS::AccountId}:secret:recall/*
+              - Sid: SamExecutionRoles
+                Effect: Allow
+                Action:
+                  - iam:CreateRole
+                  - iam:DeleteRole
+                  - iam:GetRole
+                  - iam:TagRole
+                  - iam:PutRolePolicy
+                  - iam:DeleteRolePolicy
+                  - iam:AttachRolePolicy
+                  - iam:DetachRolePolicy
+                  - iam:PassRole
+                Resource: !Sub arn:aws:iam::${AWS::AccountId}:role/recall-*
+
+Outputs:
+  DeployerRoleArn:
+    Value: !GetAtt DeployerRole.Arn

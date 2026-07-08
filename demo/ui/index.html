@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Recall — memory you can SELECT from</title>
+<style>
+  :root { --bg:#0b0e14; --panel:#141a26; --line:#233047; --text:#e6edf3;
+          --dim:#8b98ab; --accent:#4cc38a; --episode:#5a9cf8; }
+  * { box-sizing:border-box; margin:0; }
+  body { background:var(--bg); color:var(--text); font:15px/1.5 ui-monospace,Menlo,monospace;
+         max-width:900px; margin:0 auto; padding:24px 16px; }
+  h1 { font-size:20px; } h1 em { color:var(--accent); font-style:normal; }
+  p.sub { color:var(--dim); margin:4px 0 20px; }
+  .row { display:flex; gap:8px; margin-bottom:12px; }
+  input,button,textarea { font:inherit; color:inherit; background:var(--panel);
+    border:1px solid var(--line); border-radius:8px; padding:10px 12px; }
+  input { flex:1; } button { cursor:pointer; } button:hover { border-color:var(--accent); }
+  #log { display:flex; flex-direction:column; gap:10px; }
+  .mem { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:10px 14px; }
+  .mem .tier { font-size:12px; color:var(--episode); }
+  .mem .tier.semantic { color:var(--accent); }
+  .mem .dist { float:right; color:var(--dim); font-size:12px; }
+  .hint { color:var(--dim); font-size:13px; margin-top:16px; }
+  code { color:var(--accent); }
+</style>
+</head>
+<body>
+<h1>Recall — <em>agentic memory you can SELECT from</em></h1>
+<p class="sub">CockroachDB (episodes + vector index) × AWS Bedrock (Titan v2 + Claude consolidation)</p>
+
+<div class="row">
+  <input id="store" placeholder="teach it something… e.g. 'we deploy to us-east-1'">
+  <button onclick="storeMemory()">store_memory</button>
+</div>
+<div class="row">
+  <input id="query" placeholder="ask its memory… e.g. 'what region do we use?'">
+  <button onclick="recall()">recall</button>
+  <button onclick="consolidate()" title="episodic → semantic distillation">consolidate 💤</button>
+</div>
+
+<div id="log"></div>
+<p class="hint">endpoint: <code id="ep"></code> — override with <code>?api=&lt;url&gt;</code>.
+The same memories are one SQL query away: <code>SELECT kind, statement, confidence FROM semantic_memories;</code></p>
+
+<script>
+const API = new URLSearchParams(location.search).get('api') || '/mcp';
+const AGENT = 'demo', SESSION = 's-' + new Date().toISOString().slice(0,10);
+document.getElementById('ep').textContent = API;
+
+async function mcp(name, args) {
+  const r = await fetch(API, { method:'POST', headers:{'content-type':'application/json'},
+    body: JSON.stringify({ jsonrpc:'2.0', id:1, method:'tools/call',
+                           params:{ name, arguments:args } }) });
+  const rpc = await r.json();
+  return JSON.parse(rpc.result.content[0].text);
+}
+function show(html) {
+  const d = document.createElement('div'); d.className = 'mem'; d.innerHTML = html;
+  document.getElementById('log').prepend(d);
+}
+async function storeMemory() {
+  const content = document.getElementById('store').value.trim(); if (!content) return;
+  const out = await mcp('store_memory',
+    { agent_id:AGENT, session_id:SESSION, role:'user', content });
+  show(`<span class="tier">stored episode</span> ${content}
+        <span class="dist">${out.episode_id.slice(0,8)}…</span>`);
+  document.getElementById('store').value = '';
+}
+async function recall() {
+  const query = document.getElementById('query').value.trim(); if (!query) return;
+  const out = await mcp('recall', { agent_id:AGENT, query, k:5 });
+  if (!out.memories.length) return show('<span class="tier">recall</span> (no memories yet)');
+  out.memories.forEach(m => show(
+    `<span class="tier ${m.tier}">${m.tier}</span> ${m.text}
+     <span class="dist">d=${m.distance.toFixed(3)}</span>`));
+}
+async function consolidate() {
+  const out = await mcp('consolidate', { agent_id:AGENT });
+  show(`<span class="tier semantic">consolidation triggered</span>
+        Claude is distilling episodes → semantic memories… re-run recall shortly.
+        <span class="dist">${out.triggered ? 'ok' : '?'}</span>`);
+}
+for (const [id, fn] of [['store', storeMemory], ['query', recall]])
+  document.getElementById(id).addEventListener('keydown', e => e.key === 'Enter' && fn());
+</script>
+</body>
+</html>

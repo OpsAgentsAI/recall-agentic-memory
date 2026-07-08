@@ -1,0 +1,47 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  id-token: write   # OIDC — keyless, no stored AWS secrets
+  contents: read
+
+concurrency: deploy-recall
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::952933884163:role/recall-gha-deployer
+          aws-region: us-east-1
+      - name: Install SAM
+        run: pip install aws-sam-cli
+      - name: Build
+        run: sam build --template infra/template.yaml
+      - name: Deploy
+        run: |
+          sam deploy \
+            --stack-name recall \
+            --resolve-s3 \
+            --capabilities CAPABILITY_NAMED_IAM \
+            --no-confirm-changeset \
+            --no-fail-on-empty-changeset \
+            --region us-east-1
+      - name: Smoke — MCP tools/list on the live endpoint
+        run: |
+          URL=$(aws cloudformation describe-stacks --stack-name recall \
+            --query "Stacks[0].Outputs[?OutputKey=='DemoUrl'].OutputValue" --output text)
+          echo "DemoUrl: $URL"
+          curl -sf -X POST "$URL" -H 'content-type: application/json' \
+            -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' \
+            | python3 -c "import sys,json; tools={t['name'] for t in json.load(sys.stdin)['result']['tools']}; assert tools=={'store_memory','recall','forget','consolidate'}, tools; print('MCP smoke OK:', sorted(tools))"
