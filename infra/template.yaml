@@ -40,8 +40,10 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       FunctionName: recall-mcp-server
-      CodeUri: ../src/mcp_server/
-      Handler: handler.lambda_handler
+      # CodeUri is the whole src/ tree so the shared `common` package is packaged
+      # alongside the handler (both handlers do `from common import ...`).
+      CodeUri: ../src/
+      Handler: mcp_server.handler.lambda_handler
       Description: MCP tools - store_memory / recall / forget / consolidate(trigger)
       Environment:
         Variables:
@@ -68,8 +70,8 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       FunctionName: recall-consolidation
-      CodeUri: ../src/consolidation/
-      Handler: handler.lambda_handler
+      CodeUri: ../src/
+      Handler: consolidation.handler.lambda_handler
       Timeout: 300
       Description: EventBridge-scheduled Bedrock Claude distillation of episodes.
       Policies:

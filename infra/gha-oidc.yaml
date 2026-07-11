@@ -33,7 +33,13 @@ Resources:
               StringEquals:
                 token.actions.githubusercontent.com:aud: sts.amazonaws.com
               StringLike:
-                token.actions.githubusercontent.com:sub: !Sub repo:${GitHubRepo}:ref:refs/heads/main
+                # The deploy job runs with `environment: production`, so GitHub mints
+                # the OIDC token with sub=repo:<repo>:environment:production (NOT the
+                # branch ref). Allow both so a plain main-branch job or the
+                # environment-scoped deploy can each assume the role.
+                token.actions.githubusercontent.com:sub:
+                  - !Sub repo:${GitHubRepo}:ref:refs/heads/main
+                  - !Sub repo:${GitHubRepo}:environment:production
       Policies:
         - PolicyName: recall-sam-deploy
           PolicyDocument:

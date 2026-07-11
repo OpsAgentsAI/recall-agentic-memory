@@ -1,0 +1,5 @@
+# Lambda runtime deps for the Recall functions (mcp_server + consolidation).
+# boto3 is provided by the Lambda Python runtime; psycopg is not — bundle the
+# binary wheel (includes libpq). Built via `sam build --use-container` so the
+# arm64 manylinux wheel is fetched for the target runtime.
+psycopg[binary]
