@@ -19,6 +19,11 @@ Globals:
         # Claude via inference profile (region-routed); Haiku tier for consolidation
         CONSOLIDATE_MODEL_ID: !Ref ConsolidateModelId
         POWERTOOLS_SERVICE_NAME: recall
+        # psycopg[binary] bundles its own OpenSSL whose compiled-in default CA
+        # path is empty in the Lambda image, so the DSN's sslrootcert=system
+        # had no trust store -> "certificate verify failed" against CockroachDB's
+        # public cert chain. Point OpenSSL at Amazon Linux 2023's CA bundle.
+        SSL_CERT_FILE: /etc/pki/tls/certs/ca-bundle.crt
 
 Parameters:
   ConsolidateModelId:
