@@ -1,9 +1,10 @@
 name: Deploy
 
-# Until scripts/bootstrap-aws.sh has created the recall-gha-deployer role,
-# this workflow can only fail — manual trigger only. Flip to push-on-main
-# right after the bootstrap stack exists.
+# Keyless deploys are armed (recall-gha-deployer OIDC role + live stack), so
+# main pushes auto-deploy; workflow_dispatch stays for manual re-runs.
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
