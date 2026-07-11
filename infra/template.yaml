@@ -9,7 +9,9 @@ Globals:
     Runtime: python3.13
     Timeout: 30
     MemorySize: 512
-    Architectures: [arm64]
+    # x86_64 so the x86 GitHub runner's plain `sam build` installs native
+    # psycopg[binary] wheels (no --use-container / QEMU cross-arch build).
+    Architectures: [x86_64]
     Environment:
       Variables:
         CRDB_SECRET_ARN: !Ref CrdbConnectionSecret

@@ -28,9 +28,9 @@ jobs:
       - name: Install SAM
         run: pip install aws-sam-cli
       - name: Build
-        # --use-container so psycopg[binary]'s arm64 manylinux wheel is built
-        # for the Lambda target runtime, not the x86 GitHub runner.
-        run: sam build --use-container --template infra/template.yaml
+        # Lambdas are x86_64 (see template Globals), matching this x86 runner, so
+        # pip installs the native psycopg[binary] wheel directly — no container.
+        run: sam build --template infra/template.yaml
       - name: Deploy
         run: |
           sam deploy \
