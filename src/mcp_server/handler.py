@@ -17,12 +17,23 @@ import hashlib
 import json
 import logging
 import os
+import pathlib
 from typing import Any
 
 from common import bedrock, db  # src/common — shared clients
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
+
+# Browser-facing demo page, served on GET so the public DemoUrl is clickable
+# (POST /mcp stays the JSON-RPC API). Bundled next to this handler.
+try:
+    _DEMO_HTML = (pathlib.Path(__file__).parent / "demo.html").read_text(encoding="utf-8")
+except OSError:  # pragma: no cover - fallback if the asset is missing
+    _DEMO_HTML = (
+        "<!doctype html><title>Recall</title>"
+        "<p>Recall MCP endpoint — POST JSON-RPC 2.0 to <code>/mcp</code>.</p>"
+    )
 
 PROTOCOL_VERSION = "2025-06-18"
 SERVER_INFO = {"name": "recall-memory", "version": "0.2.0"}
@@ -205,6 +216,16 @@ def handle_mcp(msg: dict[str, Any]) -> dict[str, Any] | None:
 # ---- Lambda entrypoint -----------------------------------------------------------
 
 def lambda_handler(event: dict[str, Any], _context: Any) -> dict[str, Any]:
+    # A browser GET (judge clicking the DemoUrl) gets the interactive demo page;
+    # the API itself is POST-only JSON-RPC.
+    method = (
+        event.get("requestContext", {}).get("http", {}).get("method")
+        or event.get("httpMethod")
+        or "POST"
+    )
+    if method == "GET":
+        return _html_resp(200, _DEMO_HTML)
+
     try:
         body = json.loads(event.get("body") or "{}")
     except json.JSONDecodeError:
@@ -240,4 +261,12 @@ def _resp(status: int, payload: Any) -> dict[str, Any]:
         "statusCode": status,
         "headers": {"content-type": "application/json"},
         "body": json.dumps(payload, default=str),
+    }
+
+
+def _html_resp(status: int, html: str) -> dict[str, Any]:
+    return {
+        "statusCode": status,
+        "headers": {"content-type": "text/html; charset=utf-8"},
+        "body": html,
     }

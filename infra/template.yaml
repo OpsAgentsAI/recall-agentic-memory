@@ -71,6 +71,20 @@ Resources:
             ApiId: !Ref RecallApi
             Path: /mcp
             Method: POST
+        # Browser GETs serve the interactive demo page so the public DemoUrl
+        # (and the API root) are clickable for judges — POST /mcp is the API.
+        DemoGetMcp:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref RecallApi
+            Path: /mcp
+            Method: GET
+        DemoRoot:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref RecallApi
+            Path: /
+            Method: GET
 
   # ---- Consolidation worker (episodic -> semantic, the "dream" job) --------
   ConsolidationFunction:
